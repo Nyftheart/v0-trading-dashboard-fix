@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>📊 Trading Dashboard</title>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js + Zoom Plugin -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    :root{ --bg:#0b0d12; --panel:#121722; --text:#e8eefc; --grid:#1f2633; }
+    html,body{height:100%}
+    body{
+      background:
+        radial-gradient(1200px 500px at 80% -20%, rgba(167,139,250,.12), transparent 60%),
+        radial-gradient(1000px 400px at 10% -10%, rgba(96,165,250,.14), transparent 55%),
+        var(--bg);
+      color:var(--text);
+    }
+    .panel{ background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));
+            border:1px solid rgba(255,255,255,.06); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.2) }
+    .glass{ backdrop-filter: blur(6px); }
+    .kbd{ background:#0f1420; border:1px solid #20293a; padding:.15rem .4rem; border-radius:.4rem; }
+    .table thead th{ position:sticky; top:0; background:#0f1420; }
+
+    /* Conteneurs de graphiques avec hauteurs fixes pour éviter la croissance infinie */
+    .chart-container {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .chart-container--lg {
+      height: 320px;
+      max-height: 320px;
+      min-height: 320px;
+    }
+
+    .chart-container--md {
+      height: 220px;
+      max-height: 220px;
+      min-height: 220px;
+    }
+
+    .chart-container--sm {
+      height: 60px;
+      max-height: 60px;
+      min-height: 60px;
+    }
+
+    .chart-container canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <!-- Topbar -->
+  <header class="sticky top-0 z-40">
+    <div class="glass panel max-w-7xl mx-auto mt-4 px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">📊</span>
+        <h1 class="text-xl md:text-2xl font-semibold tracking-tight">Trading Dashboard</h1>
+        <span id="liveBadge" class="border border-white/10 rounded-full px-2 py-0.5 text-xs hidden md:inline">Live</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="refreshBtn" class="px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition text-sm flex items-center gap-2"><i data-lucide="refresh-ccw" class="w-4 h-4"></i> Rafraîchir</button>
+        <div class="flex items-center gap-2 text-xs text-white/70">
+          <span>Auto</span>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input id="autoToggle" type="checkbox" class="sr-only peer">
+            <div class="w-10 h-5 bg-white/10 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:w-4 after:h-4 after:rounded-full after:transition-all"></div>
+          </label>
+          <span>60s</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- KPIs -->
+  <section class="max-w-7xl mx-auto px-4 mt-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="panel p-4">
+        <div class="text-xs uppercase tracking-wide text-white/60">Équité (dernière)</div>
+        <div class="mt-2 flex items-baseline gap-2">
+          <div class="text-3xl font-semibold" id="equityVal">{{ equity_val }} €</div>
+          <div id="equityDelta" class="text-sm"></div>
+        </div>
+        <div class="text-xs text-white/50 mt-1">à {{ equity_ts }}</div>
+        <div class="chart-container chart-container--sm mt-2">
+          <canvas id="equitySpark"></canvas>
+        </div>
+      </div>
+      <div class="panel p-4">
+        <div class="text-xs uppercase tracking-wide text-white/60">Tickers suivis</div>
+        <div class="mt-2 text-3xl font-semibold">{{ tickers|length }}</div>
+        <div class="text-xs text-white/60 mt-1 truncate">{{ ", ".join(tickers) }}</div>
+      </div>
+      <div class="panel p-4">
+        <div class="text-xs uppercase tracking-wide text-white/60">Recherche & Filtre</div>
+        <div class="mt-2 flex gap-2 flex-wrap">
+          <input id="searchInput" placeholder="Filtrer symboles…" class="flex-1 bg-transparent border border-white/10 rounded-lg px-3 py-2 outline-none focus:border-white/20" />
+          <select id="timeRange" class="bg-transparent border border-white/10 rounded-lg px-2">
+            <option value="24">24h</option>
+            <option value="72">72h</option>
+            <option value="168">7j</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Positions rendues directement depuis les données Jinja2 -->
+  <section class="max-w-7xl mx-auto px-4 mt-6">
+    <div class="panel p-4">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold flex items-center gap-2">
+          <i data-lucide="wallet" class="w-5 h-5"></i>
+          Mes Positions
+        </h2>
+        <div class="text-sm text-white/60">
+          <span id="totalPositionsValue">—</span>
+        </div>
+      </div>
+      <div class="overflow-auto">
+        <table class="table w-full text-sm">
+          <thead>
+            <tr class="text-left text-white/70 border-b border-white/10">
+              <th class="py-3 px-3">Symbole</th>
+              <th class="py-3 px-3 text-right">Quantité</th>
+              <th class="py-3 px-3 text-right">Prix d'entrée</th>
+              <th class="py-3 px-3 text-right">Prix actuel</th>
+              <th class="py-3 px-3 text-right">Valeur</th>
+              <th class="py-3 px-3 text-right">P&L</th>
+              <th class="py-3 px-3 text-right">P&L %</th>
+              <th class="py-3 px-3 text-center">Score de vente</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Positions will be loaded dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Grid -->
+  <section class="max-w-7xl mx-auto px-4 mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- Equity chart -->
+    <div class="panel p-4 lg:col-span-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Courbe d'équité (<span id="equityRangeLabel">24h</span>)</h2>
+        <div class="text-xs text-white/60">Pincer pour zoomer • <span class="kbd">dblclick</span> pour reset</div>
+      </div>
+      <div class="chart-container chart-container--lg mt-3">
+        <canvas id="equityChart"></canvas>
+      </div>
+      <div id="equityMsg" class="text-sm text-white/60 mt-2"></div>
+    </div>
+
+    <!-- Indicators table -->
+    <div class="panel p-4">
+      <h2 class="text-lg font-semibold mb-3">Derniers indicateurs</h2>
+      <div class="overflow-auto max-h-[420px]">
+        <table id="indTable" class="table w-full text-sm">
+          <thead>
+            <tr class="text-left text-white/70">
+              <th class="py-2 px-2">Symbole</th>
+              <th class="py-2 px-2">Heure</th>
+              <th class="py-2 px-2">Close</th>
+              <th class="py-2 px-2">SMA_s</th>
+              <th class="py-2 px-2">SMA_l</th>
+              <th class="py-2 px-2">RSI</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in indicators %}
+            <tr class="hover:bg-white/5 transition">
+              <td class="py-2 px-2"><a class="text-sky-400 hover:underline" href="#" onclick="loadSymbol('{{ r.symbol }}');return false;">{{ r.symbol }}</a></td>
+              <td class="py-2 px-2">{{ r.ts }}</td>
+              <td class="py-2 px-2">{{ r.close }}</td>
+              <td class="py-2 px-2">{{ r.sma_s }}</td>
+              <td class="py-2 px-2">{{ r.sma_l }}</td>
+              <td class="py-2 px-2">{{ r.rsi }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Symbol charts - mode lignes uniquement (pas de chandeliers car endpoint manquant) -->
+    <div class="panel p-4 lg:col-span-3">
+      <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Graphique (symboles)</h2>
+          <p class="text-xs text-white/60">Prix, SMAs et RSI pour chaque symbole</p>
+        </div>
+        <div class="flex gap-2 flex-wrap items-center">
+          <select id="symbolSelect" class="bg-transparent border border-white/10 rounded-lg px-2 py-2">
+            <option value="" selected disabled>Choisir un symbole…</option>
+            {% for t in tickers %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+          <label class="text-xs flex items-center gap-2"><input id="toggleSMA" type="checkbox" class="accent-sky-400" checked /> SMA</label>
+          <label class="text-xs flex items-center gap-2"><input id="toggleRSI" type="checkbox" class="accent-sky-400" checked /> RSI</label>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="lg:col-span-2">
+          <div class="chart-container chart-container--lg">
+            <canvas id="symbolPrice"></canvas>
+          </div>
+          <div id="priceMsg" class="text-sm text-white/60 mt-2"></div>
+        </div>
+        <div class="lg:col-span-1">
+          <div class="chart-container chart-container--md">
+            <canvas id="symbolRSI"></canvas>
+          </div>
+          <div id="rsiMsg" class="text-sm text-white/60 mt-2"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="max-w-7xl mx-auto px-4 mt-6 mb-8 text-center text-xs text-white/50">
+    App mise à jour <span id="lastUpdated">—</span>
+  </footer>
+
+<script>
+const fmt = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 });
+const $ = s => document.querySelector(s);
+Chart.register(ChartZoom);
+Chart.defaults.color = '#cdd6f6';
+Chart.defaults.borderColor = '#1f2633';
+
+const commonOptions = {
+  responsive: false,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: { labels: { usePointStyle: true, boxWidth: 6 } },
+    zoom: {
+      zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
+      pan: { enabled: true, mode: 'x' },
+      limits: { x: { minRange: 10 } }
+    }
+  },
+  scales: {
+    x: { grid: { color: 'rgba(255,255,250,.06)' } },
+    y: { grid: { color: 'rgba(255,255,250,.06)' } }
+  }
+};
+
+let equityChart, equitySpark, priceChart, rsiChart, lastSymbol=null;
+
+function setMsg(el, text){ el.textContent = text || ''; }
+
+function calculateTotalPositions(){
+  const rows = document.querySelectorAll('tbody tr[class*="hover:bg-white/5"]');
+  let total = 0;
+  rows.forEach(row => {
+    const valueCell = row.children[4].textContent;
+    const value = parseFloat(valueCell.replace(/[^0-9.-]/g, ''));
+    if(!isNaN(value)) total += value;
+  });
+  $('#totalPositionsValue').textContent = `Total: ${fmt.format(total)} €`;
+}
+
+async function loadKPIs(){
+  try{
+    const r = await fetch('/api/kpis.json');
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+
+    $('#equityVal').textContent = fmt.format(j.equity) + ' €';
+    const tsEl = document.querySelector('.text-xs.text-white\\/50.mt-1');
+    if(tsEl) tsEl.textContent = `à ${j.equity_ts}`;
+  }catch(err){
+    console.error('[v0] Erreur chargement KPIs:', err);
+  }
+}
+
+async function loadPositions(){
+  try{
+    const r = await fetch('/api/positions.json');
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+
+    const tbody = document.querySelector('tbody');
+    if(!j.positions || j.positions.length === 0){
+      tbody.innerHTML = '<tr><td colspan="8" class="py-8 text-center text-white/50">Aucune position ouverte</td></tr>';
+      $('#totalPositionsValue').textContent = 'Total: 0.00 €';
+      return;
+    }
+
+    tbody.innerHTML = j.positions.map(pos => {
+      const value = pos.last ? pos.last * pos.qty : 0;
+      const pnlPercent = (pos.entry && pos.qty) ? (pos.pnl / (pos.entry * pos.qty)) * 100 : 0;
+      const pnlClass = pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+      const pnlSign = pos.pnl >= 0 ? '+' : '';
+
+      let safetyScoreHtml = '<span class="text-white/40">—</span>';
+      if (pos.safety_score !== null && pos.safety_score !== undefined) {
+        const score = pos.safety_score;
+        let scoreClass = '';
+        let scoreIcon = '';
+        let scoreLabel = '';
+        
+        if (score >= 70) {
+          scoreClass = 'text-emerald-400 bg-emerald-400/10';
+          scoreIcon = '🟢';
+          scoreLabel = 'Sûr';
+        } else if (score >= 40) {
+          scoreClass = 'text-yellow-400 bg-yellow-400/10';
+          scoreIcon = '🟡';
+          scoreLabel = 'Moyen';
+        } else {
+          scoreClass = 'text-rose-400 bg-rose-400/10';
+          scoreIcon = '🔴';
+          scoreLabel = 'Risque';
+        }
+        
+        safetyScoreHtml = `
+          <div class="flex flex-col items-center gap-1">
+            <span class="${scoreClass} px-2 py-1 rounded-lg font-medium text-xs">
+              ${scoreIcon} ${Math.round(score)}/100
+            </span>
+            <span class="text-xs text-white/50">${scoreLabel}</span>
+          </div>
+        `;
+      }
+
+      return `
+        <tr class="hover:bg-white/5 transition border-b border-white/5">
+          <td class="py-3 px-3">
+            <a class="text-sky-400 hover:underline font-medium" href="#" onclick="loadSymbol('${pos.symbol}');return false;">
+              ${pos.symbol}
+            </a>
+          </td>
+          <td class="py-3 px-3 text-right">${fmt.format(pos.qty)}</td>
+          <td class="py-3 px-3 text-right">${fmt.format(pos.entry)} €</td>
+          <td class="py-3 px-3 text-right">${pos.last ? fmt.format(pos.last) + ' €' : '—'}</td>
+          <td class="py-3 px-3 text-right font-medium">${value ? fmt.format(value) + ' €' : '—'}</td>
+          <td class="py-3 px-3 text-right ${pnlClass} font-medium">
+            ${pnlSign}${fmt.format(pos.pnl)} €
+          </td>
+          <td class="py-3 px-3 text-right ${pnlClass} font-medium">
+            ${pnlSign}${fmt.format(pnlPercent)}%
+          </td>
+          <td class="py-3 px-3 text-center">
+            ${safetyScoreHtml}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    calculateTotalPositions();
+  }catch(err){
+    console.error('[v0] Erreur chargement positions:', err);
+  }
+}
+
+/* ===== Equity ===== */
+async function loadEquity(hours=24){
+  const msg = $('#equityMsg'); setMsg(msg, '');
+  try{
+    const r = await fetch(`/api/equity.json?hours=${hours}`);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    $('#equityRangeLabel').textContent = hours + 'h';
+
+    if(equityChart) equityChart.destroy();
+
+    if(!j.equity || j.equity.length===0){
+      setMsg(msg, "Aucune donnée d'équité sur la période.");
+      return;
+    }
+
+    const ctx = $('#equityChart').getContext('2d');
+    const container = $('#equityChart').parentElement;
+    $('#equityChart').width = container.clientWidth;
+    $('#equityChart').height = 320;
+
+    equityChart = new Chart(ctx, {
+      type:'line',
+      data:{ labels:j.ts, datasets:[{
+        label:'Équité', data:j.equity, tension:.25, pointRadius:0, borderWidth:2, borderColor:'#60a5fa', fill:true,
+        backgroundColor:(c)=>{
+          const {chart} = c; const {ctx:cx, chartArea:area} = chart;
+          if(!area) return 'rgba(96,165,250,.08)';
+          const g=cx.createLinearGradient(0, area.bottom, 0, area.top);
+          g.addColorStop(0,'rgba(96,165,250,.00)'); g.addColorStop(1,'rgba(96,165,250,.18)');
+          return g;
+        }
+      }]},
+      options:{ ...commonOptions, plugins:{ ...commonOptions.plugins, legend:{display:false} }, scales:{ x:{display:false}, y:{ ticks:{ callback:v=>fmt.format(v)+' €' } } } }
+    });
+
+    const last = j.equity[j.equity.length-1];
+    $('#equityVal').textContent = fmt.format(last) + ' €';
+
+    // spark + delta
+    const first=j.equity[0];
+    const pct = first?((last-first)/first*100):0;
+    const el=$('#equityDelta'); el.textContent=`${pct>=0?'+':''}${pct.toFixed(2)}%`; el.className='text-sm ' + (pct>=0?'text-emerald-400':'text-rose-400');
+
+    const sp = $('#equitySpark').getContext('2d');
+    if(equitySpark) equitySpark.destroy();
+
+    const sparkContainer = $('#equitySpark').parentElement;
+    $('#equitySpark').width = sparkContainer.clientWidth;
+    $('#equitySpark').height = 60;
+
+    equitySpark = new Chart(sp, {
+      type:'line',
+      data:{ labels:j.ts, datasets:[{ data:j.equity, borderWidth:1.5, pointRadius:0, tension:.25, borderColor:pct>=0?'#22c55e':'#ef4444', fill:false }] },
+      options:{ ...commonOptions, plugins:{legend:{display:false}}, scales:{x:{display:false}, y:{display:false}} }
+    });
+  }catch(err){
+    console.error(err);
+    setMsg(msg, `Erreur de chargement: ${String(err)}`);
+  }
+}
+
+/* ===== Lines (price/SMAs + RSI) ===== */
+async function loadSymbol(sym){
+  if(!sym) return;
+  lastSymbol = sym;
+
+  const msgP=$('#priceMsg'), msgR=$('#rsiMsg');
+  setMsg(msgP,'');
+  setMsg(msgR,'');
+
+  try{
+    const r = await fetch('/api/indicators.json?symbol=' + encodeURIComponent(sym));
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+
+    if(priceChart) priceChart.destroy();
+    if(rsiChart) rsiChart.destroy();
+
+    if(!j.ts || j.ts.length===0){
+      setMsg(msgP, `Pas de données pour ${sym}.`);
+      return;
+    }
+
+    const ctxP = document.getElementById('symbolPrice').getContext('2d');
+    const showSMA = document.getElementById('toggleSMA').checked;
+    const priceSets=[{
+      label:sym+' Close',
+      data:j.close,
+      yAxisID:'y',
+      borderWidth:2,
+      tension:.25,
+      pointRadius:0,
+      borderColor:'#93c5fd'
+    }];
+
+    if(showSMA){
+      priceSets.push(
+        { label:'SMA_s', data:j.sma_s, yAxisID:'y', borderDash:[4,4], tension:.2, pointRadius:0, borderWidth:1.5, borderColor:'#a78bfa' },
+        { label:'SMA_l', data:j.sma_l, yAxisID:'y', borderDash:[2,6], tension:.2, pointRadius:0, borderWidth:1.5, borderColor:'#34d399' }
+      );
+    }
+
+    const priceContainer = document.getElementById('symbolPrice').parentElement;
+    document.getElementById('symbolPrice').width = priceContainer.clientWidth;
+    document.getElementById('symbolPrice').height = 320;
+
+    priceChart = new Chart(ctxP, {
+      type:'line',
+      data:{ labels:j.ts, datasets:priceSets },
+      options:{ ...commonOptions, plugins:{ ...commonOptions.plugins, legend:{ position:'bottom' } }, scales:{ y:{ ticks:{ callback:v=>fmt.format(v) } } } }
+    });
+
+    if(document.getElementById('toggleRSI').checked){
+      const ctxR = document.getElementById('symbolRSI').getContext('2d');
+
+      const rsiContainer = document.getElementById('symbolRSI').parentElement;
+      document.getElementById('symbolRSI').width = rsiContainer.clientWidth;
+      document.getElementById('symbolRSI').height = 220;
+
+      rsiChart = new Chart(ctxR, {
+        type:'line',
+        data:{ labels:j.ts, datasets:[{ label:'RSI', data:j.rsi, borderWidth:2, pointRadius:0, tension:.2, borderColor:'#fbbf24' }] },
+        options:{ ...commonOptions, plugins:{ ...commonOptions.plugins, legend:{ position:'bottom' } }, scales:{ y:{ min:0, max:100, ticks:{ stepSize:20 } } } }
+      });
+    }
+  }catch(err){
+    console.error(err);
+    setMsg(msgP, `Erreur lignes: ${String(err)}`);
+  }
+}
+
+async function refreshData(){
+  console.log('[v0] Rafraîchissement des données...');
+  const hours = $('#timeRange').value || 24;
+
+  // Rafraîchir les KPIs
+  await loadKPIs();
+
+  // Rafraîchir les positions
+  await loadPositions();
+
+  // Rafraîchir l'équité
+  await loadEquity(hours);
+
+  // Rafraîchir le symbole actuel si un est sélectionné
+  if(lastSymbol){
+    await loadSymbol(lastSymbol);
+  }
+
+  // Mettre à jour le timestamp
+  $('#lastUpdated').textContent = new Date().toLocaleString('fr-FR');
+
+  console.log('[v0] Rafraîchissement terminé');
+}
+
+/* ===== Filtering ===== */
+$('#searchInput').addEventListener('input', (e)=>{
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll('#indTable tbody tr').forEach(tr=>{
+    const sym = tr.children[0].innerText.toLowerCase();
+    tr.style.display = sym.includes(q) ? '' : 'none';
+  });
+});
+
+/* ===== Controls ===== */
+$('#symbolSelect').addEventListener('change', e=> loadSymbol(e.target.value));
+$('#toggleSMA').addEventListener('change', ()=> lastSymbol && loadSymbol(lastSymbol));
+$('#toggleRSI').addEventListener('change', ()=> lastSymbol && loadSymbol(lastSymbol));
+$('#refreshBtn').addEventListener('click', ()=> refreshData());
+$('#timeRange').addEventListener('change', (e)=> loadEquity(e.target.value));
+
+let autoTimer=null;
+$('#autoToggle').addEventListener('change', (e)=>{ if(e.target.checked){ startAuto(); } else { stopAuto(); } });
+function startAuto(){
+  stopAuto();
+  $('#liveBadge').classList.remove('hidden');
+  // Rafraîchir immédiatement puis toutes les 60 secondes
+  refreshData();
+  autoTimer=setInterval(()=> refreshData(), 60000);
+}
+function stopAuto(){
+  if(autoTimer) clearInterval(autoTimer);
+  $('#liveBadge').classList.add('hidden');
+}
+
+/* ===== Init ===== */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  lucide.createIcons();
+  calculateTotalPositions();
+  await loadEquity(24);
+  $('#lastUpdated').textContent = new Date().toLocaleString('fr-FR');
+});
+</script>
+</body>
+</html>
