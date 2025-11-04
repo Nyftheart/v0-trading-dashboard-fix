@@ -15,7 +15,9 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 app = FastAPI(title="Trading Dashboard")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
 templates_env = Environment(
     loader=FileSystemLoader("templates"),
     autoescape=select_autoescape(["html", "xml"])

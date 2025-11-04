@@ -3,8 +3,8 @@
 CREATE TABLE IF NOT EXISTS positions (
     id SERIAL PRIMARY KEY,
     symbol VARCHAR(10) NOT NULL,
-    quantity DECIMAL(18, 8) NOT NULL,
-    entry_price DECIMAL(18, 4) NOT NULL,
+    qty DECIMAL(18, 8) NOT NULL, -- Changed from quantity to qty to match bot code
+    entry DECIMAL(18, 4) NOT NULL, -- Changed from entry_price to entry to match bot code
     entry_time TIMESTAMP NOT NULL DEFAULT NOW(),
     entry_fees DECIMAL(18, 4) DEFAULT 0,
     highest_price DECIMAL(18, 4),

@@ -8,7 +8,7 @@ pandas==2.0.3
 
 # Database
 psycopg2-binary==2.9.9
-
+sqlalchemy==2.0.23
 # Web dashboard
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
