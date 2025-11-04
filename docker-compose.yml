@@ -14,7 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "5433:5433"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bot -d trading"]
       interval: 10s
@@ -66,6 +66,12 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     command: python backend/dashboard.py
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/localhost/8080' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - trading-network
     deploy:

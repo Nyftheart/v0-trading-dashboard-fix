@@ -1079,7 +1079,7 @@ def main():
         raise SystemExit("Aucune clé API Finnhub fournie.")
     print(f"🔑 Clés Finnhub: {len(api_keys)} (optimisé pour 60 req/min)", flush=True)
 
-    db_url = os.getenv("DATABASE_URL", "postgresql://bot:botpass@db:5432/trading")
+    db_url = os.getenv("DATABASE_URL", "postgresql://bot:botpass@db:5433/trading")
     tickers = [t.strip().upper() for t in os.getenv("TICKERS", "AAPL,TSLA,NVDA").split(",") if t.strip()]
 
     # Paramètres optimisés pour 60 req/min

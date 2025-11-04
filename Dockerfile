@@ -39,8 +39,7 @@ RUN mkdir -p /app/data /app/logs
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+# Le healthcheck sera géré par docker-compose si nécessaire
 
 # Default command (can be overridden in docker-compose)
 CMD ["python", "scripts/advanced-trading-bot.py"]
